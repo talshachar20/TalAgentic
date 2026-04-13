@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+}
+
+/* Smooth scrolling for the chat window */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Custom scrollbar — subtle, not clinical */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #d0dccb;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #adc2a4;
+}
+
+/* Focus styles — accessible but calm */
+:focus-visible {
+  outline: 2px solid #628057;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Textarea resize handle — hide it, we control height programmatically */
+textarea {
+  resize: none;
+}
+
+/* Prose content in AI responses */
+.prose-calm p {
+  margin-bottom: 0.75em;
+  line-height: 1.7;
+}
+
+.prose-calm p:last-child {
+  margin-bottom: 0;
+}
+
+.prose-calm ul,
+.prose-calm ol {
+  margin-bottom: 0.75em;
+  padding-left: 1.25em;
+}
+
+.prose-calm li {
+  margin-bottom: 0.35em;
+  line-height: 1.65;
+}
+
+.prose-calm strong {
+  font-weight: 600;
+  color: #3d5036;
+}
+
+.prose-calm em {
+  font-style: italic;
+  color: #4d6544;
+}
