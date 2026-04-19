@@ -10,7 +10,7 @@
 // ============================================================
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { supabaseBrowser } from "@/lib/supabase-browser";
+import { getSupabaseBrowser } from "@/lib/supabase-browser";
 
 // ── Types ─────────────────────────────────────────────────────
 
@@ -39,8 +39,22 @@ const MAX_DYNAMIC_LISTS = 5;
 
 // ── DB helpers ─────────────────────────────────────────────────
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function dbRowToTask(row: any): Task {
+interface TaskRow {
+  id: string;
+  title: string;
+  comment: string;
+  done: boolean;
+  list_id: string;
+  created_at: string;
+}
+
+interface ListRow {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+function dbRowToTask(row: TaskRow): Task {
   return {
     id: row.id,
     text: row.title,
@@ -54,29 +68,18 @@ function emptyState(): TazoniserState {
 }
 
 async function fetchState(email: string): Promise<TazoniserState> {
+  const sb = getSupabaseBrowser();
   const [{ data: tasksData }, { data: listsData }] = await Promise.all([
-    supabaseBrowser
-      .from("tazoniser_tasks")
-      .select("*")
-      .eq("user_email", email)
-      .order("created_at"),
-    supabaseBrowser
-      .from("tazoniser_lists")
-      .select("*")
-      .eq("user_email", email)
-      .order("created_at"),
+    sb.from("tazoniser_tasks").select("*").eq("user_email", email).order("created_at"),
+    sb.from("tazoniser_lists").select("*").eq("user_email", email).order("created_at"),
   ]);
 
-  const tasks = tasksData ?? [];
-  const lists = listsData ?? [];
+  const tasks = (tasksData ?? []) as TaskRow[];
+  const lists = (listsData ?? []) as ListRow[];
 
   return {
-    genericList: tasks
-      .filter((t) => t.list_id === "generic" && !t.done)
-      .map(dbRowToTask),
-    doneList: tasks
-      .filter((t) => t.list_id === "generic" && t.done)
-      .map(dbRowToTask),
+    genericList: tasks.filter((t) => t.list_id === "generic" && !t.done).map(dbRowToTask),
+    doneList: tasks.filter((t) => t.list_id === "generic" && t.done).map(dbRowToTask),
     dynamicLists: lists.map((l) => ({
       id: l.id,
       name: l.name,
@@ -117,7 +120,7 @@ export function useTazoniser(userEmail: string | null) {
     const id = crypto.randomUUID();
     const task: Task = { id, text: text.trim(), comment: "", createdAt: Date.now() };
     setState((s) => ({ ...s, genericList: [...s.genericList, task] }));
-    await supabaseBrowser.from("tazoniser_tasks").insert({
+    await getSupabaseBrowser().from("tazoniser_tasks").insert({
       id,
       user_email: userEmail,
       list_id: "generic",
@@ -129,7 +132,7 @@ export function useTazoniser(userEmail: string | null) {
 
   const removeTask = useCallback(async (taskId: string) => {
     setState((s) => ({ ...s, genericList: s.genericList.filter((t) => t.id !== taskId) }));
-    await supabaseBrowser.from("tazoniser_tasks").delete().eq("id", taskId);
+    await getSupabaseBrowser().from("tazoniser_tasks").delete().eq("id", taskId);
   }, []);
 
   const completeTask = useCallback(async (taskId: string) => {
@@ -142,7 +145,7 @@ export function useTazoniser(userEmail: string | null) {
         doneList: [...s.doneList, task],
       };
     });
-    await supabaseBrowser.from("tazoniser_tasks").update({ done: true }).eq("id", taskId);
+    await getSupabaseBrowser().from("tazoniser_tasks").update({ done: true }).eq("id", taskId);
   }, []);
 
   const addCommentToTask = useCallback(async (taskId: string, comment: string) => {
@@ -154,7 +157,7 @@ export function useTazoniser(userEmail: string | null) {
         t.id === taskId ? { ...t, comment: trimmed } : t
       ),
     }));
-    await supabaseBrowser.from("tazoniser_tasks").update({ comment: trimmed }).eq("id", taskId);
+    await getSupabaseBrowser().from("tazoniser_tasks").update({ comment: trimmed }).eq("id", taskId);
   }, []);
 
   // ── Done List ─────────────────────────────────────────────────
@@ -169,12 +172,12 @@ export function useTazoniser(userEmail: string | null) {
         genericList: [...s.genericList, task],
       };
     });
-    await supabaseBrowser.from("tazoniser_tasks").update({ done: false }).eq("id", taskId);
+    await getSupabaseBrowser().from("tazoniser_tasks").update({ done: false }).eq("id", taskId);
   }, []);
 
   const removeDoneTask = useCallback(async (taskId: string) => {
     setState((s) => ({ ...s, doneList: s.doneList.filter((t) => t.id !== taskId) }));
-    await supabaseBrowser.from("tazoniser_tasks").delete().eq("id", taskId);
+    await getSupabaseBrowser().from("tazoniser_tasks").delete().eq("id", taskId);
   }, []);
 
   // ── Dynamic Lists ─────────────────────────────────────────────
@@ -192,7 +195,7 @@ export function useTazoniser(userEmail: string | null) {
         ],
       };
     });
-    await supabaseBrowser.from("tazoniser_lists").insert({
+    await getSupabaseBrowser().from("tazoniser_lists").insert({
       id,
       user_email: userEmail,
       name: name.trim(),
@@ -208,7 +211,7 @@ export function useTazoniser(userEmail: string | null) {
         l.id === listId ? { ...l, name: trimmed } : l
       ),
     }));
-    await supabaseBrowser.from("tazoniser_lists").update({ name: trimmed }).eq("id", listId);
+    await getSupabaseBrowser().from("tazoniser_lists").update({ name: trimmed }).eq("id", listId);
   }, []);
 
   const deleteDynamicList = useCallback(async (listId: string) => {
@@ -217,7 +220,7 @@ export function useTazoniser(userEmail: string | null) {
       dynamicLists: s.dynamicLists.filter((l) => l.id !== listId),
     }));
     // Tasks are cascade-deleted via the FK constraint on tazoniser_tasks
-    await supabaseBrowser.from("tazoniser_lists").delete().eq("id", listId);
+    await getSupabaseBrowser().from("tazoniser_lists").delete().eq("id", listId);
   }, []);
 
   const addDynamicTask = useCallback(async (listId: string, text: string) => {
@@ -230,7 +233,7 @@ export function useTazoniser(userEmail: string | null) {
         l.id === listId ? { ...l, tasks: [...l.tasks, task] } : l
       ),
     }));
-    await supabaseBrowser.from("tazoniser_tasks").insert({
+    await getSupabaseBrowser().from("tazoniser_tasks").insert({
       id,
       user_email: userEmail,
       list_id: listId,
@@ -247,7 +250,7 @@ export function useTazoniser(userEmail: string | null) {
         l.id === listId ? { ...l, tasks: l.tasks.filter((t) => t.id !== taskId) } : l
       ),
     }));
-    await supabaseBrowser.from("tazoniser_tasks").delete().eq("id", taskId);
+    await getSupabaseBrowser().from("tazoniser_tasks").delete().eq("id", taskId);
   }, []);
 
   const completeDynamicTask = useCallback(async (listId: string, taskId: string) => {
@@ -260,7 +263,7 @@ export function useTazoniser(userEmail: string | null) {
         return { ...l, tasks: l.tasks.filter((t) => t.id !== taskId), done: [...l.done, task] };
       }),
     }));
-    await supabaseBrowser.from("tazoniser_tasks").update({ done: true }).eq("id", taskId);
+    await getSupabaseBrowser().from("tazoniser_tasks").update({ done: true }).eq("id", taskId);
   }, []);
 
   const uncompleteDynamicTask = useCallback(async (listId: string, taskId: string) => {
@@ -273,7 +276,7 @@ export function useTazoniser(userEmail: string | null) {
         return { ...l, done: l.done.filter((t) => t.id !== taskId), tasks: [...l.tasks, task] };
       }),
     }));
-    await supabaseBrowser.from("tazoniser_tasks").update({ done: false }).eq("id", taskId);
+    await getSupabaseBrowser().from("tazoniser_tasks").update({ done: false }).eq("id", taskId);
   }, []);
 
   const removeDynamicDoneTask = useCallback(async (listId: string, taskId: string) => {
@@ -283,7 +286,7 @@ export function useTazoniser(userEmail: string | null) {
         l.id === listId ? { ...l, done: l.done.filter((t) => t.id !== taskId) } : l
       ),
     }));
-    await supabaseBrowser.from("tazoniser_tasks").delete().eq("id", taskId);
+    await getSupabaseBrowser().from("tazoniser_tasks").delete().eq("id", taskId);
   }, []);
 
   const addCommentToDynamicTask = useCallback(
@@ -298,7 +301,7 @@ export function useTazoniser(userEmail: string | null) {
             : l
         ),
       }));
-      await supabaseBrowser.from("tazoniser_tasks").update({ comment: trimmed }).eq("id", taskId);
+      await getSupabaseBrowser().from("tazoniser_tasks").update({ comment: trimmed }).eq("id", taskId);
     },
     []
   );

@@ -86,12 +86,6 @@ export default function TazoniserPage() {
               >
                 Create account
               </Link>
-              <Link
-                href="/"
-                className="text-sm text-slate-400 hover:text-slate-600 transition-colors mt-1"
-              >
-                Back to CalmSpace →
-              </Link>
             </div>
           </div>
         </div>
@@ -252,29 +246,7 @@ interface PageHeaderProps {
 
 function PageHeader({ user, onLogout }: PageHeaderProps) {
   return (
-    <header className="flex-none flex items-center justify-between px-4 py-2.5 border-b border-calm-100 bg-white/80 backdrop-blur-sm">
-      <Link
-        href="/"
-        className="flex items-center gap-2 text-calm-700 hover:text-calm-600 transition-colors"
-        aria-label="Back to CalmSpace"
-      >
-        <svg
-          className="w-5 h-5"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
-          aria-hidden="true"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M12 3c-1.2 5.4-5 8-9 9 0 5 4 9 9 9s9-4 9-9c-4-1-7.8-3.6-9-9z"
-          />
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 12v9" />
-        </svg>
-        <span className="text-sm font-medium">CalmSpace</span>
-      </Link>
+    <header className="flex-none flex items-center justify-end px-4 py-2.5 border-b border-calm-100 bg-white/80 backdrop-blur-sm">
 
       {user && (
         <div className="flex items-center gap-3">

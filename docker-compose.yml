@@ -1,0 +1,18 @@
+services:
+  calmspace:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # NEXT_PUBLIC_* vars must be baked into the client bundle at build time.
+      # Docker Compose reads substitution vars from .env (not .env.local), so
+      # always run with: docker compose --env-file .env.local up --build
+      args:
+        - NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+        - NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+    # Server-only secrets are injected at runtime — never baked into the image.
+    env_file:
+      - .env.local
+    ports:
+      - "3000:3000"
+    restart: unless-stopped

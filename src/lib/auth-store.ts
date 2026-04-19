@@ -6,7 +6,7 @@
 // restart. Wire up a sessions table to change this.
 // ============================================================
 
-import { supabase } from "./supabase";
+import { getSupabase } from "./supabase";
 
 // In-memory session store: token → email
 const sessions = new Map<string, string>();
@@ -28,7 +28,7 @@ export async function registerUser(
   const key = email.toLowerCase().trim();
   const passwordHash = await hashPassword(password);
 
-  const { error } = await supabase
+  const { error } = await getSupabase()
     .from("users")
     .insert({ email: key, name: name.trim(), password_hash: passwordHash });
 
@@ -45,7 +45,7 @@ export async function authenticateUser(
   const key = email.toLowerCase().trim();
   const hash = await hashPassword(password);
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("users")
     .select("email, name, password_hash")
     .eq("email", key)
@@ -69,7 +69,7 @@ export async function getSessionUser(
   const email = sessions.get(token);
   if (!email) return null;
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabase()
     .from("users")
     .select("email, name")
     .eq("email", email)

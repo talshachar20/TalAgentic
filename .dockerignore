@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env*
+node_modules
+.next
+README.md
+Dockerfile
+docker-compose.yml
+tests
+test-results
+playwright-report
+*.log

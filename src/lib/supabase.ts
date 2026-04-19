@@ -1,10 +1,24 @@
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-// Prefer service role key (bypasses RLS) for server-side auth operations.
-// Falls back to anon key — requires RLS policies to be configured in Supabase.
-const supabaseKey =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ??
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+// Lazy singleton — not initialized at module load time.
+// Avoids build failures when env vars are absent during `next build`.
+let _client: SupabaseClient | null = null;
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+export function getSupabase(): SupabaseClient {
+  if (!_client) {
+    // Use non-NEXT_PUBLIC_ vars for server-side code — Next.js does NOT
+    // statically replace these at build time, so they are read correctly
+    // from the container environment at runtime.
+    const url = process.env.SUPABASE_URL;
+    const key =
+      process.env.SUPABASE_SERVICE_ROLE_KEY ??
+      process.env.SUPABASE_ANON_KEY;
+    if (!url || !key) {
+      throw new Error(
+        "Missing Supabase env vars: SUPABASE_URL and SUPABASE_ANON_KEY (or SUPABASE_SERVICE_ROLE_KEY) are required."
+      );
+    }
+    _client = createClient(url, key);
+  }
+  return _client;
+}
