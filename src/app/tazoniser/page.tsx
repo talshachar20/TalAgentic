@@ -157,6 +157,9 @@ export default function TazoniserPage() {
                   onComplete={taz.completeTask}
                   onRemove={taz.removeTask}
                   onAddComment={taz.addCommentToTask}
+                  onAddSubTask={taz.addSubTask}
+                  onToggleSubTask={taz.toggleSubTask}
+                  onRemoveSubTask={taz.removeSubTask}
                 />
               </SectionCard>
 
@@ -227,6 +230,9 @@ export default function TazoniserPage() {
                   onUncompleteTask={taz.uncompleteDynamicTask}
                   onRemoveDoneTask={taz.removeDynamicDoneTask}
                   onAddComment={taz.addCommentToDynamicTask}
+                  onAddSubTask={taz.addSubTask}
+                  onToggleSubTask={taz.toggleSubTask}
+                  onRemoveSubTask={taz.removeSubTask}
                 />
               </SectionCard>
             </section>

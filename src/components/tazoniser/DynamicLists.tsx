@@ -25,6 +25,9 @@ interface DynamicListsProps {
   onUncompleteTask: (listId: string, taskId: string) => void;
   onRemoveDoneTask: (listId: string, taskId: string) => void;
   onAddComment: (listId: string, taskId: string, comment: string) => void;
+  onAddSubTask: (taskId: string, text: string) => void;
+  onToggleSubTask: (taskId: string, subTaskId: string, done: boolean) => void;
+  onRemoveSubTask: (taskId: string, subTaskId: string) => void;
 }
 
 export function DynamicLists({
@@ -39,6 +42,9 @@ export function DynamicLists({
   onUncompleteTask,
   onRemoveDoneTask,
   onAddComment,
+  onAddSubTask,
+  onToggleSubTask,
+  onRemoveSubTask,
 }: DynamicListsProps) {
   const [newListName, setNewListName] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -249,9 +255,10 @@ export function DynamicLists({
                       onAdd={(text) => onAddTask(list.id, text)}
                       onComplete={(taskId) => onCompleteTask(list.id, taskId)}
                       onRemove={(taskId) => onRemoveTask(list.id, taskId)}
-                      onAddComment={(taskId, comment) =>
-                        onAddComment(list.id, taskId, comment)
-                      }
+                      onAddComment={(taskId, comment) => onAddComment(list.id, taskId, comment)}
+                      onAddSubTask={onAddSubTask}
+                      onToggleSubTask={onToggleSubTask}
+                      onRemoveSubTask={onRemoveSubTask}
                       placeholder="Add a task to this list…"
                     />
 

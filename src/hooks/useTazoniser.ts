@@ -14,10 +14,18 @@ import { getSupabaseBrowser } from "@/lib/supabase-browser";
 
 // ── Types ─────────────────────────────────────────────────────
 
+export interface SubTask {
+  id: string;
+  text: string;
+  done: boolean;
+  createdAt: number;
+}
+
 export interface Task {
   id: string;
   text: string;
   comment: string;   // single note per task — matches DB schema
+  subTasks: SubTask[];
   createdAt: number;
 }
 
@@ -35,7 +43,7 @@ export interface TazoniserState {
   dynamicLists: DynamicList[];
 }
 
-const MAX_DYNAMIC_LISTS = 5;
+const MAX_DYNAMIC_LISTS = 15;
 
 // ── DB helpers ─────────────────────────────────────────────────
 
@@ -54,11 +62,20 @@ interface ListRow {
   created_at: string;
 }
 
-function dbRowToTask(row: TaskRow): Task {
+interface SubTaskRow {
+  id: string;
+  task_id: string;
+  title: string;
+  done: boolean;
+  created_at: string;
+}
+
+function dbRowToTask(row: TaskRow, subTasks: SubTask[] = []): Task {
   return {
     id: row.id,
     text: row.title,
     comment: row.comment ?? "",
+    subTasks,
     createdAt: new Date(row.created_at).getTime(),
   };
 }
@@ -67,25 +84,54 @@ function emptyState(): TazoniserState {
   return { genericList: [], doneList: [], dynamicLists: [] };
 }
 
+function updateTaskInState(
+  state: TazoniserState,
+  taskId: string,
+  updater: (task: Task) => Task
+): TazoniserState {
+  const mapTask = (t: Task) => (t.id === taskId ? updater(t) : t);
+  return {
+    ...state,
+    genericList: state.genericList.map(mapTask),
+    doneList: state.doneList.map(mapTask),
+    dynamicLists: state.dynamicLists.map((l) => ({
+      ...l,
+      tasks: l.tasks.map(mapTask),
+      done: l.done.map(mapTask),
+    })),
+  };
+}
+
 async function fetchState(email: string): Promise<TazoniserState> {
   const sb = getSupabaseBrowser();
-  const [{ data: tasksData }, { data: listsData }] = await Promise.all([
+  const [{ data: tasksData }, { data: listsData }, { data: subTasksData }] = await Promise.all([
     sb.from("tazoniser_tasks").select("*").eq("user_email", email).order("created_at"),
     sb.from("tazoniser_lists").select("*").eq("user_email", email).order("created_at"),
+    sb.from("tazoniser_subtasks").select("*").eq("user_email", email).order("created_at"),
   ]);
 
   const tasks = (tasksData ?? []) as TaskRow[];
   const lists = (listsData ?? []) as ListRow[];
+  const rawSubTasks = (subTasksData ?? []) as SubTaskRow[];
+
+  // Build taskId → SubTask[] map
+  const subTaskMap = new Map<string, SubTask[]>();
+  for (const s of rawSubTasks) {
+    const arr = subTaskMap.get(s.task_id) ?? [];
+    arr.push({ id: s.id, text: s.title, done: s.done, createdAt: new Date(s.created_at).getTime() });
+    subTaskMap.set(s.task_id, arr);
+  }
+  const toTask = (row: TaskRow) => dbRowToTask(row, subTaskMap.get(row.id) ?? []);
 
   return {
-    genericList: tasks.filter((t) => t.list_id === "generic" && !t.done).map(dbRowToTask),
-    doneList: tasks.filter((t) => t.list_id === "generic" && t.done).map(dbRowToTask),
+    genericList: tasks.filter((t) => t.list_id === "generic" && !t.done).map(toTask),
+    doneList: tasks.filter((t) => t.list_id === "generic" && t.done).map(toTask),
     dynamicLists: lists.map((l) => ({
       id: l.id,
       name: l.name,
       createdAt: new Date(l.created_at).getTime(),
-      tasks: tasks.filter((t) => t.list_id === l.id && !t.done).map(dbRowToTask),
-      done: tasks.filter((t) => t.list_id === l.id && t.done).map(dbRowToTask),
+      tasks: tasks.filter((t) => t.list_id === l.id && !t.done).map(toTask),
+      done: tasks.filter((t) => t.list_id === l.id && t.done).map(toTask),
     })),
   };
 }
@@ -118,7 +164,7 @@ export function useTazoniser(userEmail: string | null) {
   const addTask = useCallback(async (text: string) => {
     if (!userEmail || !text.trim()) return;
     const id = crypto.randomUUID();
-    const task: Task = { id, text: text.trim(), comment: "", createdAt: Date.now() };
+    const task: Task = { id, text: text.trim(), comment: "", subTasks: [], createdAt: Date.now() };
     setState((s) => ({ ...s, genericList: [...s.genericList, task] }));
     await getSupabaseBrowser().from("tazoniser_tasks").insert({
       id,
@@ -226,7 +272,7 @@ export function useTazoniser(userEmail: string | null) {
   const addDynamicTask = useCallback(async (listId: string, text: string) => {
     if (!userEmail || !text.trim()) return;
     const id = crypto.randomUUID();
-    const task: Task = { id, text: text.trim(), comment: "", createdAt: Date.now() };
+    const task: Task = { id, text: text.trim(), comment: "", subTasks: [], createdAt: Date.now() };
     setState((s) => ({
       ...s,
       dynamicLists: s.dynamicLists.map((l) =>
@@ -306,6 +352,46 @@ export function useTazoniser(userEmail: string | null) {
     []
   );
 
+  // ── Sub-tasks ─────────────────────────────────────────────────
+  // These work across all list types — updateTaskInState searches
+  // genericList, doneList, and every dynamic list by task ID.
+
+  const addSubTask = useCallback(async (taskId: string, text: string) => {
+    if (!userEmail || !text.trim()) return;
+    const id = crypto.randomUUID();
+    const subTask: SubTask = { id, text: text.trim(), done: false, createdAt: Date.now() };
+    setState((s) =>
+      updateTaskInState(s, taskId, (t) => ({ ...t, subTasks: [...t.subTasks, subTask] }))
+    );
+    await getSupabaseBrowser().from("tazoniser_subtasks").insert({
+      id,
+      task_id: taskId,
+      user_email: userEmail,
+      title: subTask.text,
+      done: false,
+    });
+  }, [userEmail]);
+
+  const toggleSubTask = useCallback(async (taskId: string, subTaskId: string, done: boolean) => {
+    setState((s) =>
+      updateTaskInState(s, taskId, (t) => ({
+        ...t,
+        subTasks: t.subTasks.map((st) => (st.id === subTaskId ? { ...st, done } : st)),
+      }))
+    );
+    await getSupabaseBrowser().from("tazoniser_subtasks").update({ done }).eq("id", subTaskId);
+  }, []);
+
+  const removeSubTask = useCallback(async (taskId: string, subTaskId: string) => {
+    setState((s) =>
+      updateTaskInState(s, taskId, (t) => ({
+        ...t,
+        subTasks: t.subTasks.filter((st) => st.id !== subTaskId),
+      }))
+    );
+    await getSupabaseBrowser().from("tazoniser_subtasks").delete().eq("id", subTaskId);
+  }, []);
+
   return {
     genericList: state.genericList,
     doneList: state.doneList,
@@ -327,5 +413,8 @@ export function useTazoniser(userEmail: string | null) {
     uncompleteDynamicTask,
     removeDynamicDoneTask,
     addCommentToDynamicTask,
+    addSubTask,
+    toggleSubTask,
+    removeSubTask,
   };
 }
