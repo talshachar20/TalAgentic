@@ -3,10 +3,12 @@
 // ============================================================
 // useTazoniser — Supabase-backed state for the Tazoniser feature
 //
-// All data is persisted in Supabase (tazoniser_tasks +
-// tazoniser_lists tables). Local state is updated optimistically
-// so the UI stays responsive — Supabase calls happen in the
-// background after each action.
+// All data is persisted in Supabase. Local state is updated
+// optimistically so the UI stays responsive.
+//
+// Shared lists: dynamic lists can be shared with other users
+// via tazoniser_list_members. fetchState loads both owned and
+// shared lists. A 15-second poll keeps shared lists in sync.
 // ============================================================
 
 import { useState, useEffect, useCallback, useRef } from "react";
@@ -24,7 +26,7 @@ export interface SubTask {
 export interface Task {
   id: string;
   text: string;
-  comment: string;   // single note per task — matches DB schema
+  comment: string;
   subTasks: SubTask[];
   createdAt: number;
 }
@@ -35,6 +37,9 @@ export interface DynamicList {
   tasks: Task[];
   done: Task[];
   createdAt: number;
+  ownerEmail: string;
+  members: string[];  // collaborator emails (owner excluded)
+  isOwner: boolean;
 }
 
 export interface TazoniserState {
@@ -44,8 +49,9 @@ export interface TazoniserState {
 }
 
 const MAX_DYNAMIC_LISTS = 15;
+const POLL_INTERVAL_MS = 15_000;
 
-// ── DB helpers ─────────────────────────────────────────────────
+// ── DB row shapes ──────────────────────────────────────────────
 
 interface TaskRow {
   id: string;
@@ -59,6 +65,7 @@ interface TaskRow {
 interface ListRow {
   id: string;
   name: string;
+  user_email: string;
   created_at: string;
 }
 
@@ -69,6 +76,13 @@ interface SubTaskRow {
   done: boolean;
   created_at: string;
 }
+
+interface ListMemberRow {
+  list_id: string;
+  user_email: string;
+}
+
+// ── Pure helpers ───────────────────────────────────────────────
 
 function dbRowToTask(row: TaskRow, subTasks: SubTask[] = []): Task {
   return {
@@ -102,36 +116,89 @@ function updateTaskInState(
   };
 }
 
+// ── fetchState ─────────────────────────────────────────────────
+// Loads all lists the user owns or is a member of, plus their
+// tasks, subtasks, and member rosters.
+
 async function fetchState(email: string): Promise<TazoniserState> {
   const sb = getSupabaseBrowser();
-  const [{ data: tasksData }, { data: listsData }, { data: subTasksData }] = await Promise.all([
-    sb.from("tazoniser_tasks").select("*").eq("user_email", email).order("created_at"),
+
+  // Round 1 (parallel): owned lists + membership links
+  const [{ data: ownedListsRaw }, { data: memberLinksRaw }] = await Promise.all([
     sb.from("tazoniser_lists").select("*").eq("user_email", email).order("created_at"),
-    sb.from("tazoniser_subtasks").select("*").eq("user_email", email).order("created_at"),
+    sb.from("tazoniser_list_members").select("list_id").eq("user_email", email),
   ]);
 
-  const tasks = (tasksData ?? []) as TaskRow[];
-  const lists = (listsData ?? []) as ListRow[];
-  const rawSubTasks = (subTasksData ?? []) as SubTaskRow[];
+  const ownedLists = (ownedListsRaw ?? []) as ListRow[];
+  const ownedIds = new Set(ownedLists.map((l) => l.id));
+  const foreignIds = ((memberLinksRaw ?? []) as { list_id: string }[])
+    .map((r) => r.list_id)
+    .filter((id) => !ownedIds.has(id));
 
-  // Build taskId → SubTask[] map
+  // Round 2 (parallel): shared list details + user's generic tasks
+  const [sharedListsData, genericTasksData] = await Promise.all([
+    foreignIds.length > 0
+      ? sb.from("tazoniser_lists").select("*").in("id", foreignIds).order("created_at")
+          .then((r) => (r.data ?? []) as ListRow[])
+      : Promise.resolve([] as ListRow[]),
+    sb.from("tazoniser_tasks").select("*")
+      .eq("user_email", email).eq("list_id", "generic").order("created_at")
+      .then((r) => (r.data ?? []) as TaskRow[]),
+  ]);
+
+  const allLists = [...ownedLists, ...sharedListsData];
+  const allListIds = allLists.map((l) => l.id);
+
+  // Round 3 (parallel): tasks for all accessible lists + member rosters
+  const [listTasksData, membersData] = await Promise.all([
+    allListIds.length > 0
+      ? sb.from("tazoniser_tasks").select("*").in("list_id", allListIds).order("created_at")
+          .then((r) => (r.data ?? []) as TaskRow[])
+      : Promise.resolve([] as TaskRow[]),
+    allListIds.length > 0
+      ? sb.from("tazoniser_list_members").select("*").in("list_id", allListIds)
+          .then((r) => (r.data ?? []) as ListMemberRow[])
+      : Promise.resolve([] as ListMemberRow[]),
+  ]);
+
+  // Round 4: subtasks keyed by task ID
+  const allTaskIds = [...genericTasksData, ...listTasksData].map((t) => t.id);
+  let rawSubTasks: SubTaskRow[] = [];
+  if (allTaskIds.length > 0) {
+    const { data } = await sb.from("tazoniser_subtasks").select("*")
+      .in("task_id", allTaskIds).order("created_at");
+    rawSubTasks = (data ?? []) as SubTaskRow[];
+  }
+
+  // Build lookup maps
   const subTaskMap = new Map<string, SubTask[]>();
   for (const s of rawSubTasks) {
     const arr = subTaskMap.get(s.task_id) ?? [];
     arr.push({ id: s.id, text: s.title, done: s.done, createdAt: new Date(s.created_at).getTime() });
     subTaskMap.set(s.task_id, arr);
   }
+
+  const memberMap = new Map<string, string[]>();
+  for (const m of membersData) {
+    const arr = memberMap.get(m.list_id) ?? [];
+    arr.push(m.user_email);
+    memberMap.set(m.list_id, arr);
+  }
+
   const toTask = (row: TaskRow) => dbRowToTask(row, subTaskMap.get(row.id) ?? []);
 
   return {
-    genericList: tasks.filter((t) => t.list_id === "generic" && !t.done).map(toTask),
-    doneList: tasks.filter((t) => t.list_id === "generic" && t.done).map(toTask),
-    dynamicLists: lists.map((l) => ({
+    genericList: genericTasksData.filter((t) => !t.done).map(toTask),
+    doneList: genericTasksData.filter((t) => t.done).map(toTask),
+    dynamicLists: allLists.map((l) => ({
       id: l.id,
       name: l.name,
       createdAt: new Date(l.created_at).getTime(),
-      tasks: tasks.filter((t) => t.list_id === l.id && !t.done).map(toTask),
-      done: tasks.filter((t) => t.list_id === l.id && t.done).map(toTask),
+      ownerEmail: l.user_email,
+      members: (memberMap.get(l.id) ?? []).filter((e) => e !== l.user_email),
+      isOwner: l.user_email === email,
+      tasks: listTasksData.filter((t) => t.list_id === l.id && !t.done).map(toTask),
+      done: listTasksData.filter((t) => t.list_id === l.id && t.done).map(toTask),
     })),
   };
 }
@@ -143,6 +210,7 @@ export function useTazoniser(userEmail: string | null) {
   const [hydrated, setHydrated] = useState(false);
   const loadedEmailRef = useRef<string | null>(null);
 
+  // Initial load
   useEffect(() => {
     if (!userEmail) {
       setState(emptyState());
@@ -158,6 +226,15 @@ export function useTazoniser(userEmail: string | null) {
       setHydrated(true);
     });
   }, [userEmail]);
+
+  // Polling — keeps shared lists in sync for all collaborators
+  useEffect(() => {
+    if (!userEmail || !hydrated) return;
+    const id = setInterval(() => {
+      fetchState(userEmail).then(setState);
+    }, POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [userEmail, hydrated]);
 
   // ── Generic List ──────────────────────────────────────────────
 
@@ -237,7 +314,16 @@ export function useTazoniser(userEmail: string | null) {
         ...s,
         dynamicLists: [
           ...s.dynamicLists,
-          { id, name: name.trim(), tasks: [], done: [], createdAt: Date.now() },
+          {
+            id,
+            name: name.trim(),
+            tasks: [],
+            done: [],
+            createdAt: Date.now(),
+            ownerEmail: userEmail,
+            members: [],
+            isOwner: true,
+          },
         ],
       };
     });
@@ -265,7 +351,6 @@ export function useTazoniser(userEmail: string | null) {
       ...s,
       dynamicLists: s.dynamicLists.filter((l) => l.id !== listId),
     }));
-    // Tasks are cascade-deleted via the FK constraint on tazoniser_tasks
     await getSupabaseBrowser().from("tazoniser_lists").delete().eq("id", listId);
   }, []);
 
@@ -353,8 +438,8 @@ export function useTazoniser(userEmail: string | null) {
   );
 
   // ── Sub-tasks ─────────────────────────────────────────────────
-  // These work across all list types — updateTaskInState searches
-  // genericList, doneList, and every dynamic list by task ID.
+  // updateTaskInState searches all lists by task ID — works for
+  // both own and shared list tasks.
 
   const addSubTask = useCallback(async (taskId: string, text: string) => {
     if (!userEmail || !text.trim()) return;
@@ -392,6 +477,40 @@ export function useTazoniser(userEmail: string | null) {
     await getSupabaseBrowser().from("tazoniser_subtasks").delete().eq("id", subTaskId);
   }, []);
 
+  // ── Sharing ───────────────────────────────────────────────────
+
+  const inviteToList = useCallback(async (listId: string, inviteeEmail: string) => {
+    const trimmed = inviteeEmail.trim().toLowerCase();
+    if (!trimmed || trimmed === userEmail) return;
+    setState((s) => ({
+      ...s,
+      dynamicLists: s.dynamicLists.map((l) =>
+        l.id === listId && !l.members.includes(trimmed)
+          ? { ...l, members: [...l.members, trimmed] }
+          : l
+      ),
+    }));
+    await getSupabaseBrowser()
+      .from("tazoniser_list_members")
+      .upsert({ list_id: listId, user_email: trimmed }, { onConflict: "list_id,user_email" });
+  }, [userEmail]);
+
+  const removeFromList = useCallback(async (listId: string, memberEmail: string) => {
+    setState((s) => ({
+      ...s,
+      dynamicLists: s.dynamicLists.map((l) =>
+        l.id === listId
+          ? { ...l, members: l.members.filter((e) => e !== memberEmail) }
+          : l
+      ),
+    }));
+    await getSupabaseBrowser()
+      .from("tazoniser_list_members")
+      .delete()
+      .eq("list_id", listId)
+      .eq("user_email", memberEmail);
+  }, []);
+
   return {
     genericList: state.genericList,
     doneList: state.doneList,
@@ -416,5 +535,7 @@ export function useTazoniser(userEmail: string | null) {
     addSubTask,
     toggleSubTask,
     removeSubTask,
+    inviteToList,
+    removeFromList,
   };
 }

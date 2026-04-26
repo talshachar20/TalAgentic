@@ -233,6 +233,8 @@ export default function TazoniserPage() {
                   onAddSubTask={taz.addSubTask}
                   onToggleSubTask={taz.toggleSubTask}
                   onRemoveSubTask={taz.removeSubTask}
+                  onInviteToList={taz.inviteToList}
+                  onRemoveFromList={taz.removeFromList}
                 />
               </SectionCard>
             </section>

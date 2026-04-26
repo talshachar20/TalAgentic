@@ -1,0 +1,24 @@
+[Unit]
+Description=CalmSpace Application (Docker Compose)
+Documentation=https://docs.docker.com/compose/
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tal
+WorkingDirectory=/home/tal/TalAgentic/calmspace
+
+EnvironmentFile=-/home/tal/TalAgentic/calmspace/.env.local
+
+ExecStart=docker compose --env-file .env.local up --build
+ExecStop=docker compose --env-file .env.local down
+
+TimeoutStopSec=30
+
+Restart=on-failure
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target
