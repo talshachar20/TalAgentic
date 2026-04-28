@@ -2,10 +2,10 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "CalmSpace — You're not alone",
+  title: "Tazonizer - make a list",
   description:
     "A compassionate space to process your fears and concerns. AI-guided support, practical coping techniques, and a gentle reminder that you're not alone.",
-  keywords: ["mental wellness", "stress relief", "anxiety support", "coping techniques"],
+  keywords: ["list making", "manage errunds"],
   // Prevent search engines from indexing sessions — privacy first
   robots: "noindex, nofollow",
 };

@@ -492,7 +492,7 @@ export function useTazoniser(userEmail: string | null) {
     }));
     await getSupabaseBrowser()
       .from("tazoniser_list_members")
-      .upsert({ list_id: listId, user_email: trimmed }, { onConflict: "list_id,user_email" });
+      .upsert({ list_id: listId, user_email: trimmed });
   }, [userEmail]);
 
   const removeFromList = useCallback(async (listId: string, memberEmail: string) => {
